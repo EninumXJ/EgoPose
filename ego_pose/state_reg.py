@@ -43,6 +43,7 @@ dataset = Dataset(cfg.meta_id, args.data, cfg.fr_num, cfg.iter_method, cfg.shuff
 # if only predicting pose, then the out dim will be n_pose + 6 (include root velocities)
 state_dim = (dataset.traj_dim - 1) // 2 + 6 if cfg.pose_only else dataset.traj_dim
 no_cnn = (args.mode == 'save_inf' or args.test_feat is not None)
+print("no_cnn: ", no_cnn)
 state_net = VideoRegNet(state_dim, cfg.v_hdim, cfg.cnn_fdim, no_cnn=no_cnn, cnn_type=cfg.cnn_type,
                         mlp_dim=cfg.mlp_dim, v_net_type=cfg.v_net, v_net_param=cfg.v_net_param, causal=cfg.causal)
 if args.iter > 0:
@@ -58,24 +59,36 @@ optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, state_net.paramet
 fr_margin = cfg.fr_margin
 
 if args.mode == 'train':
-    to_train(state_net)
+    # to_train(state_net)
+    state_net.train()
+    # 0-100
     for i_epoch in range(args.iter, cfg.num_epoch):
         t0 = time.time()
         epoch_num_sample = 0
         epoch_loss = 0
+        print("epoch now:", i_epoch)
+        # 只有在类中实现了__next__这一成员函数，才能当成迭代器来用
         for of_np, traj_np, _ in dataset:
+            print("traj_np shape: ", traj_np.shape)
             num = traj_np.shape[0] - 2 * fr_margin
             of = tensor(of_np, dtype=dtype, device=device)
             of = torch.cat((of, zeros(of.shape[:-1] + (1,), device=device)), dim=-1).permute(0, 3, 1, 2).unsqueeze(1).contiguous()
             state_gt = tensor(traj_np[fr_margin: -fr_margin, :state_dim], dtype=dtype, device=device)
             state_pred = state_net(of)[fr_margin: -fr_margin, :]
             # compute loss
+            # print("state_gt: ", state_gt)
+            # print("state_pred: ", state_pred)
             loss = (state_gt - state_pred).pow(2).sum(dim=1).mean()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             # logging
+            if math.isnan(loss.cpu().item()):
+                print("of: ", of)
+                continue
+            print("epoch_loss: ", epoch_loss)
             epoch_loss += loss.cpu().item() * num
+            # epoch_loss = loss.cpu().item() * num
             epoch_num_sample += num
 
             """clean up gpu memory"""
@@ -87,12 +100,13 @@ if args.mode == 'train':
                     .format(i_epoch, time.time() - t0, epoch_num_sample, epoch_loss))
         tb_logger.scalar_summary('loss', epoch_loss, i_epoch)
 
-        with to_cpu(state_net):
-            if cfg.save_model_interval > 0 and (i_epoch + 1) % cfg.save_model_interval == 0:
-                cp_path = '%s/iter_%04d.p' % (cfg.model_dir, i_epoch + 1)
-                model_cp = {'state_net_dict': state_net.state_dict()}
-                meta = {'mean': dataset.mean, 'std': dataset.std}
-                pickle.dump((model_cp, meta), open(cp_path, 'wb'))
+        with torch.no_grad():
+            with to_cpu(state_net):
+                if cfg.save_model_interval > 0 and (i_epoch + 1) % cfg.save_model_interval == 0:
+                    cp_path = '%s/iter_%04d.p' % (cfg.model_dir, i_epoch + 1)
+                    model_cp = {'state_net_dict': state_net.state_dict()}
+                    meta = {'mean': dataset.mean, 'std': dataset.std}
+                    pickle.dump((model_cp, meta), open(cp_path, 'wb'))
 
 elif args.mode == 'test':
 

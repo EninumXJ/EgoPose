@@ -40,7 +40,7 @@ class Dataset:
             self.orig_trajs = []
             for i, take in enumerate(self.takes):
                 traj_file = '%s/%s_traj.p' % (self.traj_folder, take)
-                orig_traj = np.load(traj_file)
+                orig_traj = np.load(traj_file, encoding='bytes', allow_pickle=True)
                 # remove noisy hand pose
                 orig_traj[:, 32:35] = 0.0
                 orig_traj[:, 42:45] = 0.0

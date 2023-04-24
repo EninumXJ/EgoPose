@@ -35,6 +35,7 @@ class VideoRegNet(nn.Module):
             kernel_size = v_net_param.get('kernel_size', 3)
             assert tcn_size[-1] == v_hdim
             self.v_net = TemporalConvNet(cnn_fdim, tcn_size, kernel_size=kernel_size, dropout=dropout, causal=causal)
+        self.activate = torch.nn.Sigmoid()
         self.mlp = MLP(v_hdim, mlp_dim, 'relu')
         self.linear = nn.Linear(self.mlp.out_dim, out_dim)
 
@@ -51,6 +52,7 @@ class VideoRegNet(nn.Module):
         if self.cnn is not None:
             x = self.cnn(x.view((-1,) + self.frame_shape)).view(-1, x.size(1), self.cnn_fdim)
         x = self.forward_v_net(x).view(-1, self.v_hdim)
+        x = self.activate(x)
         x = self.mlp(x)
         x = self.linear(x)
         return x
